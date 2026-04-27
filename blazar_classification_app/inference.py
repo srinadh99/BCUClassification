@@ -19,8 +19,6 @@ os.environ.setdefault("MPLCONFIGDIR", str(PROJECT_ROOT / ".mplconfig"))
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from mcp_tool import load_qhat_csv, select_qhat_for_alpha, testing  # noqa: E402
-
 
 FEATURE_COLUMNS = [
     "PL_Index",
@@ -100,6 +98,49 @@ MODEL_SPECS = {
 }
 
 
+def _get_nonconformity_dict(labels: list[str]) -> dict[str, Any]:
+    def _make(label: str):
+        return lambda row: 1.0 - row[label]
+
+    return {label: _make(label) for label in labels}
+
+
+def _testing(test_row: pd.Series, qhat_dict: dict[str, float]) -> list[str]:
+    labels = list(test_row.index[1:])
+    nonconf = _get_nonconformity_dict(labels)
+    return [label for label, fn in nonconf.items() if fn(test_row) < qhat_dict[label]]
+
+
+def _load_qhat_csv(path: Path) -> tuple[pd.DataFrame, list[str]]:
+    df = pd.read_csv(path, float_precision="round_trip")
+    if "alpha" not in df.columns:
+        raise ValueError(f"{path} must contain an 'alpha' column.")
+    qhat_cols = [column for column in df.columns if column.startswith("qhat_")]
+    if not qhat_cols:
+        raise ValueError(f"{path} must contain one or more 'qhat_<label>' columns.")
+    labels = sorted(column[len("qhat_"):] for column in qhat_cols)
+    ordered = ["alpha"] + (["n_cal"] if "n_cal" in df.columns else []) + [
+        f"qhat_{label}" for label in labels
+    ]
+    return df[ordered].sort_values("alpha").reset_index(drop=True), labels
+
+
+def _select_qhat_for_alpha(
+    qhat_table: pd.DataFrame,
+    labels: list[str],
+    alpha: float,
+    *,
+    allow_nearest: bool = True,
+) -> tuple[dict[str, float], float]:
+    alpha_values = qhat_table["alpha"].to_numpy(dtype=float)
+    idx = int(np.argmin(np.abs(alpha_values - alpha)))
+    chosen_alpha = float(alpha_values[idx])
+    if not np.isclose(chosen_alpha, alpha) and not allow_nearest:
+        raise ValueError(f"Requested alpha={alpha:.6f} was not found in the qhat CSV.")
+    row = qhat_table.iloc[idx]
+    return {label: float(row[f"qhat_{label}"]) for label in labels}, chosen_alpha
+
+
 def _inverse_transform_column(column: str, values: pd.Series | np.ndarray) -> np.ndarray:
     values_np = np.asarray(values, dtype=np.float64)
     if column in LOG_SKIP_COLUMNS:
@@ -130,7 +171,7 @@ class ModelRuntime:
         checkpoint = torch.load(spec.checkpoint_path, map_location=device, weights_only=False)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.model.eval()
-        self.qhat_table, self.labels = load_qhat_csv(spec.qhat_path)
+        self.qhat_table, self.labels = _load_qhat_csv(spec.qhat_path)
 
     def predict(self, standardized_features: np.ndarray, alpha: float) -> dict[str, Any]:
         features_tensor = torch.tensor(standardized_features, dtype=torch.float32, device=self.device)
@@ -139,7 +180,7 @@ class ModelRuntime:
         fsrq = np.clip(fsrq, 1e-7, 1.0 - 1e-7)
         bll = 1.0 - fsrq
 
-        qhat_dict, chosen_alpha = select_qhat_for_alpha(
+        qhat_dict, chosen_alpha = _select_qhat_for_alpha(
             self.qhat_table,
             self.labels,
             alpha=float(alpha),
@@ -150,7 +191,7 @@ class ModelRuntime:
         set_labels = []
         for bll_prob, fsrq_prob in zip(bll, fsrq):
             row = pd.Series({"true_label": "BLL", "BLL": bll_prob, "FSRQ": fsrq_prob})
-            conformal_set = testing(row, qhat_dict, nonconf_type="baseline")
+            conformal_set = _testing(row, qhat_dict)
             prediction_sets.append(conformal_set)
             set_labels.append(_format_prediction_set(conformal_set))
 

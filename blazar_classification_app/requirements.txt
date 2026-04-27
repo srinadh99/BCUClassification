@@ -1,4 +1,5 @@
 fastapi
+matplotlib
 numpy
 pandas
 python-multipart
