@@ -1,0 +1,7 @@
+fastapi
+numpy
+pandas
+python-multipart
+streamlit
+torch
+uvicorn

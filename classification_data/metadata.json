@@ -1,0 +1,38 @@
+{
+  "selected_columns": [
+    "PL_Index",
+    "nu_syn",
+    "LP_Index",
+    "Pivot_Energy",
+    "Frac_Variability",
+    "Variability_Index",
+    "nuFnu_syn",
+    "CLASS"
+  ],
+  "feature_columns": [
+    "PL_Index",
+    "nu_syn",
+    "LP_Index",
+    "Pivot_Energy",
+    "Frac_Variability",
+    "Variability_Index",
+    "nuFnu_syn"
+  ],
+  "target": "CLASS",
+  "train_shape": [
+    1604,
+    7
+  ],
+  "val_shape": [
+    200,
+    7
+  ],
+  "test_shape": [
+    201,
+    7
+  ],
+  "bcu_shape": [
+    1115,
+    7
+  ]
+}
